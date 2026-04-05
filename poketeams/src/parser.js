@@ -65,11 +65,28 @@ export function detectFormat(raw) {
 }
 
 export function spriteUrl(name) {
+  // Use Showdown's home-ani sprites (SV-era animated home sprites)
+  const cleaned = name.toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+  return `https://play.pokemonshowdown.com/sprites/home/${cleaned}.png`;
+}
+
+export function spriteUrlFallback(name) {
   const cleaned = name.toLowerCase()
     .replace(/['']/g, "")
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
   return `https://play.pokemonshowdown.com/sprites/gen5/${cleaned}.png`;
+}
+
+export function itemSpriteUrl(item) {
+  const cleaned = item.toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+  return `https://play.pokemonshowdown.com/sprites/itemicons/${cleaned}.png`;
 }
 
 export const TYPE_COLORS = {
