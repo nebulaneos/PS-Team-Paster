@@ -1,98 +1,162 @@
-export function parsePaste(raw) {
-  const lines = raw.trim().split("\n");
-  const mons = [];
-  let cur = null;
+import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
+import { parsePaste } from "./parser";
 
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) {
-      if (cur) { mons.push(cur); cur = null; }
-      continue;
-    }
+/* ---------- SPRITES ---------- */
 
-    if (!cur) {
-      cur = {
-        name: "", nickname: "", item: "", ability: "", nature: "",
-        evs: {}, ivs: {}, moves: [], gender: "", tera: "", level: 100,
-      };
-      const atIdx = t.indexOf(" @ ");
-      let namePart = atIdx > -1 ? t.slice(0, atIdx) : t;
-      if (atIdx > -1) cur.item = t.slice(atIdx + 3).trim();
+function getSprite(name, isShiny, mode) {
+  const formatted = name.toLowerCase().replace(/ /g, "-");
 
-      const parenMatch = namePart.match(/^(.+?)\s*\(([^)]+)\)\s*(?:\(([MF])\))?/);
-      if (parenMatch) {
-        cur.nickname = parenMatch[1].trim();
-        cur.name = parenMatch[2].trim();
-        if (parenMatch[3]) cur.gender = parenMatch[3];
-      } else {
-        const gMatch = namePart.match(/^(.+?)\s*\(([MF])\)\s*$/);
-        if (gMatch) { cur.name = gMatch[1].trim(); cur.gender = gMatch[2]; }
-        else cur.name = namePart.trim();
-      }
-      continue;
-    }
-
-    if (t.startsWith("Ability:")) { cur.ability = t.slice(8).trim(); continue; }
-    if (t.startsWith("Level:")) { cur.level = parseInt(t.slice(6).trim()); continue; }
-    if (t.startsWith("Tera Type:")) { cur.tera = t.slice(10).trim(); continue; }
-    if (t.startsWith("EVs:")) {
-      t.slice(4).trim().split("/").forEach(s => {
-        const m = s.trim().match(/(\d+)\s+(\w+)/);
-        if (m) cur.evs[m[2]] = parseInt(m[1]);
-      });
-      continue;
-    }
-    if (t.startsWith("IVs:")) {
-      t.slice(4).trim().split("/").forEach(s => {
-        const m = s.trim().match(/(\d+)\s+(\w+)/);
-        if (m) cur.ivs[m[2]] = parseInt(m[1]);
-      });
-      continue;
-    }
-    if (t.endsWith("Nature")) { cur.nature = t.replace(" Nature", "").trim(); continue; }
-    if (t.startsWith("- ")) { cur.moves.push(t.slice(2).trim()); continue; }
+  if (mode === "home") {
+    return `https://img.pokemondb.net/sprites/home/${isShiny ? "shiny" : "normal"}/${formatted}.png`;
   }
 
-  if (cur) mons.push(cur);
-  return mons;
+  return `https://img.pokemondb.net/sprites/scarlet-violet/${isShiny ? "shiny" : "normal"}/${formatted}.png`;
 }
 
-export function detectFormat(raw) {
-  const lower = raw.toLowerCase();
-  if (lower.includes("tera type:")) return "Gen 9";
-  if (lower.includes("dynamax level") || lower.includes("gigantamax")) return "Gen 8";
-  return "Gen 7 or earlier";
+function Pokemon({ mon, mode }) {
+  return (
+    <div style={{ border: "1px solid #ddd", padding: 10, marginBottom: 8 }}>
+      <img src={getSprite(mon.name, mon.shiny, mode)} width={80} />
+      <div>
+        {mon.name} {mon.shiny && "✨"}
+      </div>
+      {mon.moves.map((m, i) => <div key={i}>• {m}</div>)}
+    </div>
+  );
 }
 
-export function spriteUrl(name) {
-  // Use Showdown's home-ani sprites (SV-era animated home sprites)
-  const cleaned = name.toLowerCase()
-    .replace(/['']/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-  return `https://play.pokemonshowdown.com/sprites/home/${cleaned}.png`;
-}
+/* ---------- APP ---------- */
 
-export function spriteUrlFallback(name) {
-  const cleaned = name.toLowerCase()
-    .replace(/['']/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-  return `https://play.pokemonshowdown.com/sprites/gen5/${cleaned}.png`;
-}
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
 
-export function itemSpriteUrl(item) {
-  const cleaned = item.toLowerCase()
-    .replace(/['']/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-  return `https://play.pokemonshowdown.com/sprites/itemicons/${cleaned}.png`;
-}
+  const [paste, setPaste] = useState("");
+  const [mons, setMons] = useState([]);
+  const [teams, setTeams] = useState([]);
 
-export const TYPE_COLORS = {
-  Normal:"#A8A878", Bug:"#A8B820", Dark:"#705848", Dragon:"#7038F8",
-  Electric:"#F8D030", Fairy:"#EE99AC", Fighting:"#C03028", Fire:"#F08030",
-  Flying:"#A890F0", Ghost:"#705898", Grass:"#78C850", Ground:"#E0C068",
-  Ice:"#98D8D8", Poison:"#A040A0", Psychic:"#F85888", Rock:"#B8A038",
-  Steel:"#B8B8D0", Water:"#6890F0", Stellar:"#40B5A5",
-};
+  const [spriteMode, setSpriteMode] = useState("home");
+
+  /* ---------- AUTH ---------- */
+
+  useEffect(() => {
+    checkUser();
+  }, []);
+
+  const checkUser = async () => {
+    const { data } = await supabase.auth.getUser();
+    setUser(data.user);
+    if (data.user) loadTeams(data.user.id);
+  };
+
+  const signUp = async () => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password: pass,
+    });
+    if (error) alert(error.message);
+    else alert("Check your email!");
+  };
+
+  const login = async () => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: pass,
+    });
+    if (error) alert(error.message);
+    else checkUser();
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setTeams([]);
+  };
+
+  /* ---------- TEAMS ---------- */
+
+  const saveTeam = async () => {
+    if (!user) return alert("Login first");
+
+    await supabase.from("teams").insert({
+      user_id: user.id,
+      paste,
+      pokemon: mons
+    });
+
+    loadTeams(user.id);
+  };
+
+  const loadTeams = async (uid) => {
+    const { data } = await supabase
+      .from("teams")
+      .select("*")
+      .eq("user_id", uid);
+
+    setTeams(data || []);
+  };
+
+  /* ---------- PARSE ---------- */
+
+  const handleParse = () => {
+    const parsed = parsePaste(paste);
+    setMons(parsed);
+  };
+
+  /* ---------- UI ---------- */
+
+  return (
+    <div style={{ padding: 20, background: "#fff", color: "#111", minHeight: "100vh" }}>
+      <h1>PokéTeams</h1>
+
+      {/* SPRITE MODE */}
+      <select value={spriteMode} onChange={e => setSpriteMode(e.target.value)}>
+        <option value="home">HOME</option>
+        <option value="sv">SV</option>
+      </select>
+
+      {/* AUTH */}
+      {!user ? (
+        <>
+          <input placeholder="email" onChange={e => setEmail(e.target.value)} />
+          <input type="password" placeholder="password" onChange={e => setPass(e.target.value)} />
+          <button onClick={login}>Login</button>
+          <button onClick={signUp}>Sign Up</button>
+        </>
+      ) : (
+        <>
+          <div>Logged in as {user.email}</div>
+          <button onClick={logout}>Logout</button>
+
+          <hr />
+
+          {/* PASTE */}
+          <textarea
+            value={paste}
+            onChange={e => setPaste(e.target.value)}
+            style={{ width: "100%", height: 200 }}
+          />
+
+          <button onClick={handleParse}>Parse</button>
+          <button onClick={saveTeam}>Save Team</button>
+
+          <h2>Preview</h2>
+          {mons.map((m, i) => (
+            <Pokemon key={i} mon={m} mode={spriteMode} />
+          ))}
+
+          <h2>Saved Teams</h2>
+          {teams.map(t => (
+            <div key={t.id}>
+              {t.pokemon.map((p, i) => (
+                <Pokemon key={i} mon={p} mode={spriteMode} />
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
